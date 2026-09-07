@@ -1,7 +1,7 @@
 /* 一度開いたあとは通信がなくてもアプリを起動できるようにする。
    index.html と同じ場所に置いてください。 */
 
-var CACHE = 'vocab-climb-v2';
+var CACHE = 'vocab-climb-v3';
 var FILES = ['./', './index.html'];
 
 self.addEventListener('install', function(e){
