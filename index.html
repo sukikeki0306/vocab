@@ -142,6 +142,12 @@
   @keyframes lampflick{0%,100%{opacity:.85}50%{opacity:1}}
   .lamp{animation:lampflick 5s ease-in-out infinite}
 
+  .posrow{display:flex;gap:5px;flex-wrap:wrap;grid-column:1 / -1}
+  .posbtn{padding:6px 11px;font-size:12.5px;border:1px solid var(--line);
+    background:#fff;color:var(--soft);border-radius:2px}
+  .posbtn:hover{background:var(--paper);color:var(--ink)}
+  .posbtn.on{background:var(--terrain);border-color:var(--terrain);color:#fff;font-weight:600}
+
   .lvlrow{display:flex;gap:6px;flex-wrap:wrap}
   .lvlbtn{flex:1;min-width:74px;padding:9px 6px;font-family:var(--mono);font-size:12px;
     border:1px solid var(--line);background:#fff;color:var(--soft)}
@@ -222,8 +228,16 @@
       </div>
       <div class="fields" id="manualFields" style="display:none">
         <input type="text" class="ja wide" id="fMeaning" placeholder="意味（日本語）">
-        <input type="text" id="fIpa" placeholder="発音記号（任意）">
-        <input type="text" class="ja" id="fPos" placeholder="品詞（任意）">
+        <input type="text" class="wide" id="fIpa" placeholder="発音記号（任意）">
+        <div class="posrow" id="posRow">
+          <button type="button" class="posbtn" data-pos="名詞">名詞</button>
+          <button type="button" class="posbtn" data-pos="動詞">動詞</button>
+          <button type="button" class="posbtn" data-pos="形容詞">形容詞</button>
+          <button type="button" class="posbtn" data-pos="副詞">副詞</button>
+          <button type="button" class="posbtn" data-pos="前置詞">前置詞</button>
+          <button type="button" class="posbtn" data-pos="接続詞">接続詞</button>
+          <button type="button" class="posbtn" data-pos="熟語">熟語</button>
+        </div>
         <input type="text" class="wide" id="fEx" placeholder="例文（任意）">
         <input type="text" class="ja wide" id="fExJa" placeholder="例文の訳（任意）">
       </div>
@@ -255,6 +269,8 @@
           <input type="text" id="cfgKey" placeholder="eyJhbGci..."></div>
         <div class="grp"><p class="lab">同期コード</p>
           <input type="text" id="cfgCode" placeholder="自分だけが知る合言葉"></div>
+        <div class="grp"><p class="lab">AIキー（入れると意味と例文を自動で調べます）</p>
+          <input type="text" id="cfgAi" placeholder="sk-ant-..."></div>
         <div class="acts">
           <button id="cfgSave">保存して同期</button>
           <button id="syncNowBtn">いま同期する</button>
@@ -298,9 +314,10 @@
   var TOP = LEVELS.length - 1;
   var DAY = 86400000;
 
-  var words = [], cfg = { url:'', key:'', code:'' };
+  var words = [], cfg = { url:'', key:'', code:'', aikey:'' };
   var tab = 'review', queue = [], shown = false, query = '', loaded = false;
   var previewLevel = 0;
+  var manualPos = '';
   var syncTimer = null, syncing = false;
 
   var $ = function(id){ return document.getElementById(id); };
@@ -387,6 +404,8 @@
       $('cfgUrl').value = cfg.url || '';
       $('cfgKey').value = cfg.key || '';
       $('cfgCode').value = cfg.code || '';
+      $('cfgAi').value = cfg.aikey || '';
+      applyMode();
       loaded = true; rebuild();
       if (ready()) syncNow(true); else syncState('', '同期していません');
     });
@@ -470,10 +489,20 @@
     + 'exampleJa（exampleの日本語訳）, note（学習メモを日本語50字以内で。よく使う組み合わせ、紛らわしい類義語との違い、語源のいずれか）。'
     + 'JSON以外は一切出力しないでください。';
 
+  function canLookup(){ return hosted || !!cfg.aikey; }
+
   function lookup(term){
+    var h = { 'Content-Type':'application/json' };
+    var model = 'claude-sonnet-4-6';
+    if (!hosted){
+      h['x-api-key'] = cfg.aikey;
+      h['anthropic-version'] = '2023-06-01';
+      h['anthropic-dangerous-direct-browser-access'] = 'true';
+      model = 'claude-haiku-4-5-20251001';
+    }
     return fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST', headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1000, system:SYS,
+      method:'POST', headers:h,
+      body: JSON.stringify({ model:model, max_tokens:1000, system:SYS,
         messages:[{ role:'user', content:term }] })
     }).then(function(res){
       if (!res.ok) throw new Error('http'); return res.json();
@@ -516,9 +545,11 @@
     if (!w){ say('単語を入力してください。', true); return; }
     if (!m){ say('意味を入力してください。', true); return; }
     if (known(w)){ say('その単語はすでに登録されています。', true); return; }
-    addWord({ word:w, meaning:m, ipa:$('fIpa').value.trim(), pos:$('fPos').value.trim(),
+    addWord({ word:w, meaning:m, ipa:$('fIpa').value.trim(), pos:manualPos,
       example:$('fEx').value.trim(), exampleJa:$('fExJa').value.trim() });
-    ['wordIn','fMeaning','fIpa','fPos','fEx','fExJa'].forEach(function(id){ $(id).value=''; });
+    ['wordIn','fMeaning','fIpa','fEx','fExJa'].forEach(function(id){ $(id).value=''; });
+    manualPos = '';
+    Array.prototype.forEach.call($('posRow').children, function(b){ b.className = 'posbtn'; });
     say(w + ' を追加しました。'); save().then(rebuild);
   }
 
@@ -996,18 +1027,29 @@
     });
   });
 
+  $('posRow').addEventListener('click', function(e){
+    var v = e.target.getAttribute && e.target.getAttribute('data-pos');
+    if (!v) return;
+    manualPos = (manualPos === v) ? '' : v;
+    Array.prototype.forEach.call($('posRow').children, function(b){
+      b.className = 'posbtn' + (b.getAttribute('data-pos') === manualPos ? ' on' : '');
+    });
+  });
+
   $('addBtn').addEventListener('click', function(){
     if (!loaded) return;
-    if (hosted) addAuto(); else addManual();
+    if (canLookup()) addAuto(); else addManual();
   });
   $('wordIn').addEventListener('keydown', function(e){
     if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); $('addBtn').click(); }
   });
 
   $('cfgSave').addEventListener('click', function(){
-    cfg = { url:$('cfgUrl').value.trim(), key:$('cfgKey').value.trim(), code:$('cfgCode').value.trim() };
+    cfg = { url:$('cfgUrl').value.trim(), key:$('cfgKey').value.trim(),
+            code:$('cfgCode').value.trim(), aikey:$('cfgAi').value.trim() };
     store.set(CFG, JSON.stringify(cfg)).then(function(){
-      say('同期の設定を保存しました。'); syncNow(false);
+      applyMode();
+      say('設定を保存しました。'); syncNow(false);
     }).catch(function(){ say('設定を保存できませんでした。', true); });
   });
   $('syncNowBtn').addEventListener('click', function(){ syncNow(false); });
@@ -1053,24 +1095,29 @@
     save().then(function(){ say('すべて消しました。'); rebuild(); });
   });
 
+  function applyMode(){
+    if (canLookup()){
+      $('modeText').textContent = '自動入力';
+      $('capLabel').textContent = 'わからなかった単語';
+      $('wordIn').placeholder = 'turbulence\n改行かカンマで区切れば、まとめて追加できます';
+      $('addBtn').textContent = '調べて追加';
+      $('manualFields').style.display = 'none';
+      $('capHint').textContent = '意味・発音記号・例文は自動で調べます。';
+    } else {
+      $('modeText').textContent = '手入力';
+      $('capLabel').textContent = '単語と意味を入力';
+      $('wordIn').placeholder = 'turbulence';
+      $('manualFields').style.display = 'grid';
+      $('addBtn').textContent = '追加';
+      $('capHint').textContent = '「同期の設定」にAIキーを入れると、自動で調べるようになります。';
+    }
+  }
+
   window.addEventListener('online', function(){ if (ready()) syncNow(true); });
 
   /* ---------- 起動 ---------- */
 
-  if (hosted){
-    $('modeText').textContent = '自動入力モード';
-    $('capLabel').textContent = 'わからなかった単語';
-    $('wordIn').placeholder = 'turbulence\n改行かカンマで区切れば、まとめて追加できます';
-    $('addBtn').textContent = '調べて追加';
-    $('capHint').textContent = '意味・発音記号・例文は自動で調べます。';
-  } else {
-    $('modeText').textContent = 'オフラインモード';
-    $('capLabel').textContent = '単語と意味を入力';
-    $('wordIn').placeholder = 'turbulence';
-    $('manualFields').style.display = 'grid';
-    $('addBtn').textContent = '追加';
-    $('capHint').textContent = '通信がなくても復習できます。つながったときに自動で同期します。';
-  }
+  applyMode();
 
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0){
     navigator.serviceWorker.register('sw.js').catch(function(){});
