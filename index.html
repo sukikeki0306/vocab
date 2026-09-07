@@ -228,7 +228,6 @@
       </div>
       <div class="fields" id="manualFields" style="display:none">
         <input type="text" class="ja wide" id="fMeaning" placeholder="意味（日本語）">
-        <input type="text" class="wide" id="fIpa" placeholder="発音記号（任意）">
         <div class="posrow" id="posRow">
           <button type="button" class="posbtn" data-pos="名詞">名詞</button>
           <button type="button" class="posbtn" data-pos="動詞">動詞</button>
@@ -545,9 +544,9 @@
     if (!w){ say('単語を入力してください。', true); return; }
     if (!m){ say('意味を入力してください。', true); return; }
     if (known(w)){ say('その単語はすでに登録されています。', true); return; }
-    addWord({ word:w, meaning:m, ipa:$('fIpa').value.trim(), pos:manualPos,
+    addWord({ word:w, meaning:m, pos:manualPos,
       example:$('fEx').value.trim(), exampleJa:$('fExJa').value.trim() });
-    ['wordIn','fMeaning','fIpa','fEx','fExJa'].forEach(function(id){ $(id).value=''; });
+    ['wordIn','fMeaning','fEx','fExJa'].forEach(function(id){ $(id).value=''; });
     manualPos = '';
     Array.prototype.forEach.call($('posRow').children, function(b){ b.className = 'posbtn'; });
     say(w + ' を追加しました。'); save().then(rebuild);
