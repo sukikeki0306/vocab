@@ -405,7 +405,10 @@
   function ready(){ return !!(cfg.url && cfg.key && cfg.code); }
   function base(){ return cfg.url.replace(/\/+$/, '') + '/rest/v1/' + TABLE; }
   function heads(extra){
-    var h = { 'apikey': cfg.key, 'Authorization':'Bearer ' + cfg.key, 'Content-Type':'application/json' };
+    var h = { 'apikey': cfg.key, 'Content-Type':'application/json' };
+    /* 旧形式（eyJ で始まるJWT）のときだけ Authorization も送る。
+       新形式の sb_publishable_ キーは apikey だけで認証される。 */
+    if (cfg.key.indexOf('eyJ') === 0) h['Authorization'] = 'Bearer ' + cfg.key;
     if (extra) for (var k in extra) h[k] = extra[k];
     return h;
   }
@@ -426,7 +429,7 @@
     syncing = true; syncState('busy', '同期中');
     var url = base() + '?code=eq.' + encodeURIComponent(cfg.code) + '&select=data';
     return fetch(url, { headers: heads() }).then(function(res){
-      if (!res.ok) throw new Error('pull'); return res.json();
+      if (!res.ok) throw new Error('読み込み ' + res.status); return res.json();
     }).then(function(rows){
       var remote = (rows && rows[0] && Array.isArray(rows[0].data)) ? rows[0].data : [];
       words = merge(words, remote); prune();
@@ -436,13 +439,20 @@
         headers: heads({ 'Prefer':'resolution=merge-duplicates,return=minimal' }),
         body: JSON.stringify([{ code: cfg.code, data: words, updated_at: new Date().toISOString() }]) });
     }).then(function(res){
-      if (!res.ok) throw new Error('push');
+      if (!res.ok) throw new Error('書き込み ' + res.status);
       syncing = false; syncState('on', '同期しました'); rebuild();
-    }).catch(function(){
+    }).catch(function(err){
       syncing = false;
       var offline = (typeof navigator !== 'undefined' && navigator.onLine === false);
       syncState('bad', offline ? 'オフライン（あとで同期）' : '同期できません');
-      if (!quiet) say('同期に失敗しました。URL・公開キー・同期コードを確認してください。', true);
+      if (!quiet){
+        var m = String(err && err.message || '');
+        var tip = m.indexOf('404') > -1 ? 'テーブルがまだありません。SupabaseのSQL Editorで作成してください。'
+          : m.indexOf('401') > -1 || m.indexOf('403') > -1 ? '公開キーかアクセス設定が違います。'
+          : m.indexOf('400') > -1 ? '送信内容が受け付けられませんでした。'
+          : 'URLが違うか、通信できていません。';
+        say('同期に失敗しました（' + (m || '不明') + '）。' + tip, true);
+      }
       rebuild();
     });
   }
